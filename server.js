@@ -16,14 +16,27 @@ app.get("/api/memory", async (req, res) => {
     const filtered = rows.filter((row) => {
       let match = true;
 
-      if (topic && row.Topics !== topic) match = false;
+      // Case-insensitive exact match for topic
+      if (topic && row.Topics.toLowerCase() !== topic.toLowerCase()) match = false;
+
+      // Case-insensitive substring match for tag
       if (tag && !row.Tags.toLowerCase().includes(tag.toLowerCase())) match = false;
+
+      // Date filtering
       if (since && new Date(row["Last Updated"]) < new Date(since)) match = false;
-      if (q && !row["key facts"].toLowerCase().includes(q.toLowerCase())) match = false;
+
+      // Case-insensitive search across all columns
+      if (q) {
+        const query = q.toLowerCase();
+        const values = Object.values(row).map((v) => String(v).toLowerCase());
+
+        if (!values.some((v) => v.includes(query))) match = false;
+      }
 
       return match;
     });
 
+    // Send results
     res.json({ data: filtered });
   } catch (err) {
     console.error("Error fetching sheet:", err);
@@ -31,6 +44,7 @@ app.get("/api/memory", async (req, res) => {
   }
 });
 
+// Start server
 app.listen(PORT, () => {
   console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
 });
