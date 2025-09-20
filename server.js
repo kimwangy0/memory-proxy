@@ -6,13 +6,28 @@ const PORT = process.env.PORT || 3000;
 
 const SHEET_URL = "https://api.apispreadsheets.com/data/EZkiSWZtvfv4iWHO/";
 
+// Helper: Convert Excel serial date to YYYY-MM-DD
+function excelDateToISO(serial) {
+  if (!serial || isNaN(serial)) return null;
+  const baseDate = new Date(1900, 0, 1); // Jan 1, 1900
+  const converted = new Date(baseDate.getTime() + (serial - 2) * 86400000);
+  return converted.toISOString().split("T")[0]; // YYYY-MM-DD
+}
+
 app.get("/api/memory", async (req, res) => {
   try {
     const { topic, tag, since, q } = req.query;
 
     const response = await axios.get(SHEET_URL);
-    const rows = response.data?.data || [];
+    let rows = response.data?.data || [];
 
+    // Convert Last Updated to real date
+    rows = rows.map((row) => ({
+      ...row,
+      "Last Updated": excelDateToISO(row["Last Updated"]),
+    }));
+
+    // Filtering logic
     const filtered = rows.filter((row) => {
       let match = true;
 
