@@ -60,4 +60,34 @@ app.post("/api/memory", async (req, res) => {
     // 🔑 Normalize structure
     if (rowData.data && !Array.isArray(rowData.data)) {
       rowData = rowData.data; // unwrap object
-    } else if (rowData.data && Array.isArray(ro
+    } else if (rowData.data && Array.isArray(rowData.data)) {
+      rowData = rowData.data[0]; // unwrap array
+    }
+
+    // Always enforce correct structure: { data: [ { ... } ] }
+    const payload = { data: [rowData] };
+
+    // Log outgoing payload
+    console.log("📤 Payload being sent to API Spreadsheets:", JSON.stringify(payload, null, 2));
+
+    const response = await axios.post(SHEET_URL, payload);
+
+    // Log API response
+    console.log("✅ API Spreadsheets Response:", response.data);
+
+    res.json({
+      success: true,
+      message: "Row added successfully",
+      sentPayload: payload,
+      apiResponse: response.data,
+    });
+  } catch (err) {
+    console.error("❌ Error adding row:", err.response?.data || err.message);
+    res.status(500).json({ error: "Failed to add row" });
+  }
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
+});
