@@ -4,7 +4,10 @@ const axios = require("axios");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const SHEET_URL = "https://api.apispreadsheets.com/data/EZkiSWZtvfv4iWHO/";
+// Spreadsheet endpoint (configurable via .env)
+const SHEET_URL =
+  process.env.SHEET_URL ||
+  "https://api.apispreadsheets.com/data/EZkiSWZtvfv4iWHO/";
 
 app.use(express.json()); // parse JSON request bodies
 
@@ -15,6 +18,15 @@ function excelDateToISO(serial) {
   const converted = new Date(baseDate.getTime() + (serial - 2) * 86400000);
   return converted.toISOString().split("T")[0]; // YYYY-MM-DD
 }
+
+// ✅ Health check
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    service: "Memory Proxy",
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // ✅ GET /api/memory → fetch + filter data
 app.get("/api/memory", async (req, res) => {
@@ -47,7 +59,7 @@ app.get("/api/memory", async (req, res) => {
 
     res.json({ data: filtered });
   } catch (err) {
-    console.error("❌ Error fetching sheet:", err);
+    console.error("❌ Error fetching sheet:", err.message);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -57,22 +69,27 @@ app.post("/api/memory", async (req, res) => {
   try {
     let rowData = req.body;
 
-    // 🔑 Normalize structure
+    // Normalize nested structures
     if (rowData.data && !Array.isArray(rowData.data)) {
-      rowData = rowData.data; // unwrap object
+      rowData = rowData.data;
     } else if (rowData.data && Array.isArray(rowData.data)) {
-      rowData = rowData.data[0]; // unwrap array
+      rowData = rowData.data[0];
+    }
+
+    // 🔑 Validation
+    if (!rowData.Topics || !rowData.Tags || !rowData["key facts"]) {
+      return res.status(400).json({
+        error: "Missing required fields: Topics, Tags, key facts",
+      });
     }
 
     // Always enforce correct structure: { data: [ { ... } ] }
     const payload = { data: [rowData] };
 
-    // Log outgoing payload
-    console.log("📤 Payload being sent to API Spreadsheets:", JSON.stringify(payload, null, 2));
+    console.log("📤 Payload being sent:", JSON.stringify(payload, null, 2));
 
     const response = await axios.post(SHEET_URL, payload);
 
-    // Log API response
     console.log("✅ API Spreadsheets Response:", response.data);
 
     res.json({
@@ -83,7 +100,10 @@ app.post("/api/memory", async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Error adding row:", err.response?.data || err.message);
-    res.status(500).json({ error: "Failed to add row" });
+    res.status(500).json({
+      error: "Failed to add row",
+      details: err.response?.data || err.message,
+    });
   }
 });
 
