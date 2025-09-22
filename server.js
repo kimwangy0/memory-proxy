@@ -6,7 +6,7 @@ const PORT = process.env.PORT || 3000;
 
 const SHEET_URL = "https://api.apispreadsheets.com/data/EZkiSWZtvfv4iWHO/";
 
-app.use(express.json()); // <-- Needed to parse JSON request bodies
+app.use(express.json()); // parse JSON request bodies
 
 // Helper: Convert Excel serial date to YYYY-MM-DD
 function excelDateToISO(serial) {
@@ -16,7 +16,7 @@ function excelDateToISO(serial) {
   return converted.toISOString().split("T")[0]; // YYYY-MM-DD
 }
 
-// GET /api/memory (existing)
+// GET /api/memory → fetch + filter data
 app.get("/api/memory", async (req, res) => {
   try {
     const { topic, tag, since, q } = req.query;
@@ -31,6 +31,7 @@ app.get("/api/memory", async (req, res) => {
 
     const filtered = rows.filter((row) => {
       let match = true;
+
       if (topic && row.Topics.toLowerCase() !== topic.toLowerCase()) match = false;
       if (tag && !row.Tags.toLowerCase().includes(tag.toLowerCase())) match = false;
       if (since && new Date(row["Last Updated"]) < new Date(since)) match = false;
@@ -40,6 +41,7 @@ app.get("/api/memory", async (req, res) => {
         const values = Object.values(row).map((v) => String(v).toLowerCase());
         if (!values.some((v) => v.includes(query))) match = false;
       }
+
       return match;
     });
 
@@ -50,16 +52,18 @@ app.get("/api/memory", async (req, res) => {
   }
 });
 
-// POST /api/memory (new!)
+// POST /api/memory → add a new row
 app.post("/api/memory", async (req, res) => {
   try {
-    const rowData = req.body; // Expect JSON: { Topics, Tags, "key facts", "Last Updated" }
+    const rowData = req.body; // Expected: { Topics, Tags, "key facts", "Last Updated" }
 
-    const response = await axios.post(SHEET_URL, {
-      data: [rowData],
+    await axios.post(SHEET_URL, { data: [rowData] });
+
+    res.json({
+      success: true,
+      message: "Row added successfully",
+      row: rowData,
     });
-
-    res.json({ success: true, response: response.data });
   } catch (err) {
     console.error("Error adding row:", err.response?.data || err.message);
     res.status(500).json({ error: "Failed to add row" });
