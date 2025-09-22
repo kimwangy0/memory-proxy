@@ -51,38 +51,3 @@ app.get("/api/memory", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-// ✅ POST /api/memory → add a new row
-app.post("/api/memory", async (req, res) => {
-  try {
-    const rowData = req.body;
-
-    // Force correct structure: { data: [ { ... } ] }
-    const payload = {
-      data: Array.isArray(rowData) ? rowData : [rowData],
-    };
-
-    // Log outgoing payload
-    console.log("📤 Payload being sent to API Spreadsheets:", JSON.stringify(payload, null, 2));
-
-    const response = await axios.post(SHEET_URL, payload);
-
-    // Log API response
-    console.log("✅ API Spreadsheets Response:", response.data);
-
-    res.json({
-      success: true,
-      message: "Row added successfully",
-      sentPayload: payload,
-      apiResponse: response.data,
-    });
-  } catch (err) {
-    console.error("❌ Error adding row:", err.response?.data || err.message);
-    res.status(500).json({ error: "Failed to add row" });
-  }
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
-});
