@@ -6,6 +6,8 @@ const PORT = process.env.PORT || 3000;
 
 const SHEET_URL = "https://api.apispreadsheets.com/data/EZkiSWZtvfv4iWHO/";
 
+app.use(express.json()); // <-- Needed to parse JSON request bodies
+
 // Helper: Convert Excel serial date to YYYY-MM-DD
 function excelDateToISO(serial) {
   if (!serial || isNaN(serial)) return null;
@@ -14,6 +16,7 @@ function excelDateToISO(serial) {
   return converted.toISOString().split("T")[0]; // YYYY-MM-DD
 }
 
+// GET /api/memory (existing)
 app.get("/api/memory", async (req, res) => {
   try {
     const { topic, tag, since, q } = req.query;
@@ -21,41 +24,45 @@ app.get("/api/memory", async (req, res) => {
     const response = await axios.get(SHEET_URL);
     let rows = response.data?.data || [];
 
-    // Convert Last Updated to real date
     rows = rows.map((row) => ({
       ...row,
       "Last Updated": excelDateToISO(row["Last Updated"]),
     }));
 
-    // Filtering logic
     const filtered = rows.filter((row) => {
       let match = true;
-
-      // Case-insensitive exact match for topic
       if (topic && row.Topics.toLowerCase() !== topic.toLowerCase()) match = false;
-
-      // Case-insensitive substring match for tag
       if (tag && !row.Tags.toLowerCase().includes(tag.toLowerCase())) match = false;
-
-      // Date filtering
       if (since && new Date(row["Last Updated"]) < new Date(since)) match = false;
 
-      // Case-insensitive search across all columns
       if (q) {
         const query = q.toLowerCase();
         const values = Object.values(row).map((v) => String(v).toLowerCase());
-
         if (!values.some((v) => v.includes(query))) match = false;
       }
-
       return match;
     });
 
-    // Send results
     res.json({ data: filtered });
   } catch (err) {
     console.error("Error fetching sheet:", err);
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /api/memory (new!)
+app.post("/api/memory", async (req, res) => {
+  try {
+    const rowData = req.body; // Expect JSON: { Topics, Tags, "key facts", "Last Updated" }
+
+    const response = await axios.post(SHEET_URL, {
+      data: [rowData],
+    });
+
+    res.json({ success: true, response: response.data });
+  } catch (err) {
+    console.error("Error adding row:", err.response?.data || err.message);
+    res.status(500).json({ error: "Failed to add row" });
   }
 });
 
