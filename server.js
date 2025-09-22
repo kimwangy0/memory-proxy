@@ -51,3 +51,13 @@ app.get("/api/memory", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+// ✅ POST /api/memory → add a new row
+app.post("/api/memory", async (req, res) => {
+  try {
+    let rowData = req.body;
+
+    // 🔑 Normalize structure
+    if (rowData.data && !Array.isArray(rowData.data)) {
+      rowData = rowData.data; // unwrap object
+    } else if (rowData.data && Array.isArray(ro
