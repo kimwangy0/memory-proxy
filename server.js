@@ -34,48 +34,4 @@ app.get("/api/memory", async (req, res) => {
 
       if (topic && row.Topics.toLowerCase() !== topic.toLowerCase()) match = false;
       if (tag && !row.Tags.toLowerCase().includes(tag.toLowerCase())) match = false;
-      if (since && new Date(row["Last Updated"]) < new Date(since)) match = false;
-
-      if (q) {
-        const query = q.toLowerCase();
-        const values = Object.values(row).map((v) => String(v).toLowerCase());
-        if (!values.some((v) => v.includes(query))) match = false;
-      }
-
-      return match;
-    });
-
-    res.json({ data: filtered });
-  } catch (err) {
-    console.error("Error fetching sheet:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// ✅ POST /api/memory → add a new row
-app.post("/api/memory", async (req, res) => {
-  try {
-    const rowData = req.body;
-
-    // Force correct structure: { data: [ { ... } ] }
-    const payload = {
-      data: Array.isArray(rowData) ? rowData : [rowData],
-    };
-
-    await axios.post(SHEET_URL, payload);
-
-    res.json({
-      success: true,
-      message: "Row added successfully",
-      row: rowData,
-    });
-  } catch (err) {
-    console.error("Error adding row:", err.response?.data || err.message);
-    res.status(500).json({ error: "Failed to add row" });
-  }
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
-});
+      if (since && new Date(row["Last Updated"]) < new Date(since)) match = fa
