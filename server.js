@@ -16,7 +16,7 @@ function excelDateToISO(serial) {
   return converted.toISOString().split("T")[0]; // YYYY-MM-DD
 }
 
-// GET /api/memory → fetch + filter data
+// ✅ GET /api/memory → fetch + filter data
 app.get("/api/memory", async (req, res) => {
   try {
     const { topic, tag, since, q } = req.query;
@@ -52,12 +52,17 @@ app.get("/api/memory", async (req, res) => {
   }
 });
 
-// POST /api/memory → add a new row
+// ✅ POST /api/memory → add a new row
 app.post("/api/memory", async (req, res) => {
   try {
-    const rowData = req.body; // Expected: { Topics, Tags, "key facts", "Last Updated" }
+    const rowData = req.body;
 
-    await axios.post(SHEET_URL, { data: [rowData] });
+    // Force correct structure: { data: [ { ... } ] }
+    const payload = {
+      data: Array.isArray(rowData) ? rowData : [rowData],
+    };
+
+    await axios.post(SHEET_URL, payload);
 
     res.json({
       success: true,
