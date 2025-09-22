@@ -34,4 +34,3 @@ app.get("/api/memory", async (req, res) => {
 
       if (topic && row.Topics.toLowerCase() !== topic.toLowerCase()) match = false;
       if (tag && !row.Tags.toLowerCase().includes(tag.toLowerCase())) match = false;
-      if (since && new Date(row["Last Updated"]) < new Date(since)) match = fa
