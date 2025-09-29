@@ -1,29 +1,43 @@
 const express = require("express");
-const axios = require("axios");
+const { google } = require("googleapis");
+const { SecretManagerServiceClient } = require("@google-cloud/secret-manager");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Spreadsheet endpoint (configurable via .env)
-const SHEET_URL =
-  process.env.SHEET_URL ||
-  "https://api.apispreadsheets.com/data/EZkiSWZtvfv4iWHO/";
+// CONFIG: Spreadsheet + GCP
+const PROJECT_ID = process.env.GCP_PROJECT_ID || "your-project-id";
+const SECRET_NAME = process.env.SECRET_NAME || "INOUMemoryServiceAccount";
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "your-spreadsheet-id";
+const RANGE_NAME = "Memory!A:D";
+const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
-app.use(express.json()); // parse JSON request bodies
+// Secret Manager client
+const secretClient = new SecretManagerServiceClient();
 
-// Helper: Convert Excel serial date to YYYY-MM-DD
-function excelDateToISO(serial) {
-  if (!serial || isNaN(serial)) return null;
-  const baseDate = new Date(1900, 0, 1); // Jan 1, 1900
-  const converted = new Date(baseDate.getTime() + (serial - 2) * 86400000);
-  return converted.toISOString().split("T")[0]; // YYYY-MM-DD
+// 🔑 Fetch service account creds from Secret Manager
+async function getServiceAccountCredentials() {
+  const [version] = await secretClient.accessSecretVersion({
+    name: `projects/${PROJECT_ID}/secrets/${SECRET_NAME}/versions/latest`,
+  });
+  return JSON.parse(version.payload.data.toString("utf8"));
+}
+
+// 🔑 Build Sheets API client
+async function getSheetsService() {
+  const creds = await getServiceAccountCredentials();
+  const auth = new google.auth.GoogleAuth({
+    credentials: creds,
+    scopes: SCOPES,
+  });
+  return google.sheets({ version: "v4", auth });
 }
 
 // ✅ Health check
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
-    service: "Memory Proxy",
+    service: "Memory Proxy (Google Sheets)",
     timestamp: new Date().toISOString(),
   });
 });
@@ -33,27 +47,35 @@ app.get("/api/memory", async (req, res) => {
   try {
     const { topic, tag, since, q } = req.query;
 
-    const response = await axios.get(SHEET_URL);
-    let rows = response.data?.data || [];
+    const sheets = await getSheetsService();
+    const result = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE_NAME,
+    });
 
-    rows = rows.map((row) => ({
-      ...row,
-      "Last Updated": excelDateToISO(row["Last Updated"]),
-    }));
+    let rows = result.data.values || [];
 
+    // Convert rows → objects with headers
+    const headers = ["Topics", "Tags", "key facts", "Last Updated"];
+    rows = rows.slice(1).map((row) => {
+      let obj = {};
+      headers.forEach((h, i) => {
+        obj[h] = row[i] || "";
+      });
+      return obj;
+    });
+
+    // Apply filters
     const filtered = rows.filter((row) => {
       let match = true;
-
       if (topic && row.Topics.toLowerCase() !== topic.toLowerCase()) match = false;
       if (tag && !row.Tags.toLowerCase().includes(tag.toLowerCase())) match = false;
       if (since && new Date(row["Last Updated"]) < new Date(since)) match = false;
-
       if (q) {
         const query = q.toLowerCase();
         const values = Object.values(row).map((v) => String(v).toLowerCase());
         if (!values.some((v) => v.includes(query))) match = false;
       }
-
       return match;
     });
 
@@ -65,7 +87,7 @@ app.get("/api/memory", async (req, res) => {
 });
 
 // ✅ POST /api/memory → add a new row
-app.post("/api/memory", async (req, res) => {
+app.post("/api/memory", express.json(), async (req, res) => {
   try {
     let rowData = req.body;
 
@@ -83,27 +105,30 @@ app.post("/api/memory", async (req, res) => {
       });
     }
 
-    // Always enforce correct structure: { data: [ { ... } ] }
-    const payload = { data: [rowData] };
+    const newRow = [
+      rowData.Topics,
+      rowData.Tags,
+      rowData["key facts"],
+      new Date().toISOString().slice(0, 10),
+    ];
 
-    console.log("📤 Payload being sent:", JSON.stringify(payload, null, 2));
-
-    const response = await axios.post(SHEET_URL, payload);
-
-    console.log("✅ API Spreadsheets Response:", response.data);
+    const sheets = await getSheetsService();
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE_NAME,
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [newRow] },
+    });
 
     res.json({
       success: true,
       message: "Row added successfully",
-      sentPayload: payload,
-      apiResponse: response.data,
+      sentPayload: newRow,
     });
   } catch (err) {
-    console.error("❌ Error adding row:", err.response?.data || err.message);
-    res.status(500).json({
-      error: "Failed to add row",
-      details: err.response?.data || err.message,
-    });
+    console.error("❌ Error adding row:", err.message);
+    res.status(500).json({ error: "Failed to add row", details: err.message });
   }
 });
 
