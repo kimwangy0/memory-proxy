@@ -14,10 +14,16 @@ const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
 // 🔑 Load GCP service account creds for Secret Manager access
 function getSecretManagerClient() {
-  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
-    throw new Error("Missing GOOGLE_APPLICATION_CREDENTIALS_JSON env var");
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS_B64) {
+    throw new Error("Missing GOOGLE_APPLICATION_CREDENTIALS_B64 env var");
   }
-  const smCreds = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+
+  const decoded = Buffer.from(
+    process.env.GOOGLE_APPLICATION_CREDENTIALS_B64,
+    "base64"
+  ).toString("utf8");
+
+  const smCreds = JSON.parse(decoded);
   return new SecretManagerServiceClient({ credentials: smCreds });
 }
 
@@ -100,4 +106,47 @@ app.post("/api/memory", express.json(), async (req, res) => {
     let rowData = req.body;
 
     // Normalize nested structures
-    if (rowData.data && !Array.isArr
+    if (rowData.data && !Array.isArray(rowData.data)) {
+      rowData = rowData.data;
+    } else if (rowData.data && Array.isArray(rowData.data)) {
+      rowData = rowData.data[0];
+    }
+
+    // 🔑 Validation
+    if (!rowData.Topics || !rowData.Tags || !rowData["key facts"]) {
+      return res.status(400).json({
+        error: "Missing required fields: Topics, Tags, key facts",
+      });
+    }
+
+    const newRow = [
+      rowData.Topics,
+      rowData.Tags,
+      rowData["key facts"],
+      new Date().toISOString().slice(0, 10),
+    ];
+
+    const sheets = await getSheetsService();
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE_NAME,
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [newRow] },
+    });
+
+    res.json({
+      success: true,
+      message: "Row added successfully",
+      sentPayload: newRow,
+    });
+  } catch (err) {
+    console.error("❌ Error adding row:", err.message);
+    res.status(500).json({ error: "Failed to add row", details: err.message });
+  }
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
+});
