@@ -1,21 +1,15 @@
-import express from "express";
-import fetch from "node-fetch";
+const express = require("express");
+const router = express.Router();
 
-const app = express();
-app.use(express.json());
-
-const API_URL = "https://memory-proxy-6o36.onrender.com/api/memory";
-
-// In-memory storage
 let pendingCards = [];
 let lastActivityTime = Date.now();
 
-// Check inactivity every 1 min
+// Inactivity monitor (runs every minute)
 setInterval(() => {
   if (pendingCards.length > 0 && Date.now() - lastActivityTime >= 10 * 60 * 1000) {
-    console.log("⏳ Inactivity detected — summary cards pending review.");
-    // At this point you can notify the user via your frontend/console
-    // or auto-save them if that’s your workflow.
+    console.log("⏳ 10 minutes of inactivity — pending summary cards:");
+    console.log(pendingCards);
+    // 👉 Here you could push a notification, or auto-save if desired
   }
 }, 60 * 1000);
 
@@ -24,23 +18,14 @@ function createSummaryCard(conversationText) {
   return {
     Topics: "Workflow Automation",
     Tags: "schema, workflow, validation",
-    "key facts": "Schema improvements include IDs, structured tags, validation rules, and versioning.",
-    "Last Updated": new Date().toISOString()
+    "key facts": conversationText || "Default key facts placeholder",
+    "Last Updated": new Date().toISOString(),
   };
-}
-
-async function addRowToSpreadsheet(row) {
-  const res = await fetch(API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ data: row })
-  });
-  return res.ok;
 }
 
 // --- Routes ---
 // 1. Preview: generate summary card
-app.post("/preview", (req, res) => {
+router.post("/preview", (req, res) => {
   const conversation = req.body.conversation || "";
   const card = createSummaryCard(conversation);
 
@@ -50,38 +35,46 @@ app.post("/preview", (req, res) => {
   res.json({ summary_card: card, status: "pending" });
 });
 
-// 2. Save: commit summary card
-app.post("/save", async (req, res) => {
-  const row = req.body.row;
+// 2. Save: finalize card and push to spreadsheet via /api/memory
+router.post("/save", async (req, res) => {
+  try {
+    const row = req.body.row;
+    if (!row) return res.status(400).json({ error: "Missing row data" });
 
-  const success = await addRowToSpreadsheet(row);
-  if (success) {
-    // remove from pending
-    pendingCards = pendingCards.filter(c => c !== row);
-    lastActivityTime = Date.now();
-    res.json({ status: "saved", row });
-  } else {
-    res.status(500).json({ status: "failed" });
+    // Forward request to your existing /api/memory (proxy to Sheets)
+    const response = await fetch("http://localhost:3000/api/memory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: row }),
+    });
+
+    if (response.ok) {
+      pendingCards = pendingCards.filter((c) => c !== row);
+      lastActivityTime = Date.now();
+      res.json({ status: "saved", row });
+    } else {
+      const errText = await response.text();
+      res.status(500).json({ error: "Failed to save row", details: errText });
+    }
+  } catch (err) {
+    res.status(500).json({ error: "Unexpected error", details: err.message });
   }
 });
 
-// 3. Discard
-app.post("/discard", (req, res) => {
+// 3. Discard: remove from pending
+router.post("/discard", (req, res) => {
   const row = req.body.row;
+  if (!row) return res.status(400).json({ error: "Missing row data" });
 
-  pendingCards = pendingCards.filter(c => c !== row);
+  pendingCards = pendingCards.filter((c) => c !== row);
   lastActivityTime = Date.now();
 
   res.json({ status: "discarded" });
 });
 
-// 4. Retrieve pending (optional endpoint)
-app.get("/pending", (req, res) => {
+// 4. Get all pending (for review)
+router.get("/pending", (req, res) => {
   res.json({ pendingCards });
 });
 
-// --- Start server ---
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+module.exports = router;
