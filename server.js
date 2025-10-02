@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 const PROJECT_ID = process.env.GCP_PROJECT_ID || "your-project-id";
 const SECRET_NAME = process.env.SECRET_NAME || "INOUMemoryServiceAccount";
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "your-spreadsheet-id";
-const RANGE_NAME = "Memory!A:E"; // includes Confirmation Status column
+const RANGE_NAME = "Memory!A:E"; // Include Confirmation Status
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
 // 🔑 Load GCP service account creds for Secret Manager access
@@ -99,7 +99,7 @@ app.get("/api/memory", async (req, res) => {
   }
 });
 
-// ✅ POST /api/memory → add new row (default "pending")
+// ✅ POST /api/memory → add new row (now includes Confirmation Status)
 app.post("/api/memory", express.json(), async (req, res) => {
   try {
     let rowData = req.body;
@@ -121,7 +121,7 @@ app.post("/api/memory", express.json(), async (req, res) => {
       rowData.Tags,
       rowData["key facts"],
       new Date().toISOString().slice(0, 10),
-      "pending", // default status
+      rowData["Confirmation Status"] || "pending" // ✅ FIX: always write column E
     ];
 
     const sheets = await getSheetsService();
