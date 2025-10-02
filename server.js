@@ -1,7 +1,6 @@
 const express = require("express");
 const { google } = require("googleapis");
 const { SecretManagerServiceClient } = require("@google-cloud/secret-manager");
-const fetch = require("node-fetch");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 const PROJECT_ID = process.env.GCP_PROJECT_ID || "your-project-id";
 const SECRET_NAME = process.env.SECRET_NAME || "INOUMemoryServiceAccount";
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "your-spreadsheet-id";
-const RANGE_NAME = "Memory!A:D";
+const RANGE_NAME = "Memory!A:E"; // includes Confirmation Status column
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
 // 🔑 Load GCP service account creds for Secret Manager access
@@ -69,7 +68,7 @@ app.get("/api/memory", async (req, res) => {
     });
 
     let rows = result.data.values || [];
-    const headers = ["Topics", "Tags", "key facts", "Last Updated"];
+    const headers = ["Topics", "Tags", "key facts", "Last Updated", "Confirmation Status"];
 
     rows = rows.slice(1).map((row) => {
       let obj = {};
@@ -100,19 +99,17 @@ app.get("/api/memory", async (req, res) => {
   }
 });
 
-// ✅ POST /api/memory → add a new row
+// ✅ POST /api/memory → add new row (default "pending")
 app.post("/api/memory", express.json(), async (req, res) => {
   try {
     let rowData = req.body;
 
-    // Normalize nested structures
     if (rowData.data && !Array.isArray(rowData.data)) {
       rowData = rowData.data;
     } else if (rowData.data && Array.isArray(rowData.data)) {
       rowData = rowData.data[0];
     }
 
-    // 🔑 Validation
     if (!rowData.Topics || !rowData.Tags || !rowData["key facts"]) {
       return res.status(400).json({
         error: "Missing required fields: Topics, Tags, key facts",
@@ -124,6 +121,7 @@ app.post("/api/memory", express.json(), async (req, res) => {
       rowData.Tags,
       rowData["key facts"],
       new Date().toISOString().slice(0, 10),
+      "pending", // default status
     ];
 
     const sheets = await getSheetsService();
@@ -146,84 +144,10 @@ app.post("/api/memory", express.json(), async (req, res) => {
   }
 });
 
-/* ==========================================================
-   SUMMARY CARD WORKFLOW (Preview → Save → Discard → Pending)
-   ========================================================== */
+// Mount summary routes
+const summaryRoutes = require("./summaryRoutes");
+app.use("/api/summary", summaryRoutes);
 
-let pendingCards = [];
-let lastActivityTime = Date.now();
-
-// Inactivity monitor (runs every 1 min)
-setInterval(() => {
-  if (pendingCards.length > 0 && Date.now() - lastActivityTime >= 10 * 60 * 1000) {
-    console.log("⏳ 10 minutes of inactivity — pending summary cards:");
-    console.log(pendingCards);
-    // 👉 You could auto-save here if desired
-  }
-}, 60 * 1000);
-
-function createSummaryCard(conversationText) {
-  return {
-    Topics: "Workflow Automation",
-    Tags: "schema, workflow, validation",
-    "key facts": conversationText || "Default key facts placeholder",
-    "Last Updated": new Date().toISOString(),
-  };
-}
-
-// 🔹 Preview
-app.post("/api/summary/preview", express.json(), (req, res) => {
-  const conversation = req.body.conversation || "";
-  const card = createSummaryCard(conversation);
-
-  pendingCards.push(card);
-  lastActivityTime = Date.now();
-
-  res.json({ summary_card: card, status: "pending" });
-});
-
-// 🔹 Save (commits to Sheets)
-app.post("/api/summary/save", express.json(), async (req, res) => {
-  try {
-    const row = req.body.row;
-    if (!row) return res.status(400).json({ error: "Missing row data" });
-
-    const response = await fetch(`http://localhost:${PORT}/api/memory`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: row }),
-    });
-
-    if (response.ok) {
-      pendingCards = pendingCards.filter((c) => c !== row);
-      lastActivityTime = Date.now();
-      res.json({ status: "saved", row });
-    } else {
-      const errText = await response.text();
-      res.status(500).json({ error: "Failed to save row", details: errText });
-    }
-  } catch (err) {
-    res.status(500).json({ error: "Unexpected error", details: err.message });
-  }
-});
-
-// 🔹 Discard
-app.post("/api/summary/discard", express.json(), (req, res) => {
-  const row = req.body.row;
-  if (!row) return res.status(400).json({ error: "Missing row data" });
-
-  pendingCards = pendingCards.filter((c) => c !== row);
-  lastActivityTime = Date.now();
-
-  res.json({ status: "discarded" });
-});
-
-// 🔹 View pending
-app.get("/api/summary/pending", (req, res) => {
-  res.json({ pendingCards });
-});
-
-// Start server
 app.listen(PORT, () => {
   console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
   console.log(`🚀 Summary Routes available at http://localhost:${PORT}/api/summary`);
