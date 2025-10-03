@@ -9,8 +9,11 @@ const PORT = process.env.PORT || 3000;
 const PROJECT_ID = process.env.GCP_PROJECT_ID || "your-project-id";
 const SECRET_NAME = process.env.SECRET_NAME || "INOUMemoryServiceAccount";
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "your-spreadsheet-id";
-const RANGE_NAME = "Memory!A:F"; // now includes ID column
+const RANGE_NAME = "Memory!A:F"; // includes ID column
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
+
+// ⚠️ Replace this with your Memory sheet’s gid (from the URL #gid=xxxx)
+const MEMORY_SHEET_ID = parseInt(process.env.MEMORY_SHEET_ID || "0", 10);
 
 // 🔑 Load GCP service account creds for Secret Manager access
 function getSecretManagerClient() {
@@ -100,7 +103,7 @@ app.get("/api/memory", async (req, res) => {
   }
 });
 
-// ✅ POST /api/memory
+// ✅ POST /api/memory (add new row with unique ID)
 app.post("/api/memory", express.json(), async (req, res) => {
   try {
     let rowData = req.body;
@@ -122,11 +125,16 @@ app.post("/api/memory", express.json(), async (req, res) => {
       range: RANGE_NAME,
     });
 
-    const rowCount = result.data.values ? result.data.values.length : 1;
-    const nextID = rowCount; // assign sequential ID
+    let rows = result.data.values || [];
+    let maxID = 0;
+    rows.slice(1).forEach((row) => {
+      const idVal = parseInt(row[0]);
+      if (!isNaN(idVal) && idVal > maxID) maxID = idVal;
+    });
+    const nextID = maxID + 1;
 
     const newRow = [
-      nextID, // ID in Column A
+      nextID,
       rowData.Topics,
       rowData.Tags,
       rowData["key facts"],
@@ -143,62 +151,4 @@ app.post("/api/memory", express.json(), async (req, res) => {
     });
 
     res.json({ success: true, message: "Row added successfully", sentPayload: newRow });
-  } catch (err) {
-    console.error("❌ Error adding row:", err.message);
-    res.status(500).json({ error: "Failed to add row", details: err.message });
   }
-});
-
-// ✅ PUT /api/memory → update Confirmation Status by ID
-app.put("/api/memory", express.json(), async (req, res) => {
-  try {
-    const { ID, ConfirmationStatus } = req.body;
-    if (!ID || !ConfirmationStatus) {
-      return res.status(400).json({
-        error: "Missing required fields: ID and ConfirmationStatus",
-      });
-    }
-
-    const sheets = await getSheetsService();
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `Memory!F${parseInt(ID) + 1}`, // F = Confirmation Status col
-      valueInputOption: "RAW",
-      requestBody: { values: [[ConfirmationStatus]] },
-    });
-
-    res.json({ success: true, message: `Row updated: ID ${ID}`, ConfirmationStatus });
-  } catch (err) {
-    console.error("❌ Error updating row:", err.message);
-    res.status(500).json({ error: "Failed to update row", details: err.message });
-  }
-});
-
-// ✅ DELETE /api/memory → delete by ID
-app.delete("/api/memory", express.json(), async (req, res) => {
-  try {
-    const { ID } = req.body;
-    if (!ID) return res.status(400).json({ error: "Missing required field: ID" });
-
-    const sheets = await getSheetsService();
-    await sheets.spreadsheets.values.clear({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `Memory!A${parseInt(ID) + 1}:F${parseInt(ID) + 1}`,
-    });
-
-    res.json({ success: true, message: `Row deleted: ID ${ID}` });
-  } catch (err) {
-    console.error("❌ Error deleting row:", err.message);
-    res.status(500).json({ error: "Failed to delete row", details: err.message });
-  }
-});
-
-// ✅ Mount summary routes
-const summaryRoutes = require("./summaryRoutes");
-app.use("/api/summary", summaryRoutes);
-
-// ✅ Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
-  console.log(`🚀 Summary Routes available at http://localhost:${PORT}/api/summary`);
-});
