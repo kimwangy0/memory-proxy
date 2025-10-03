@@ -67,7 +67,6 @@ async function cleanupOldPending() {
     const headers = ["ID", "Topics", "Tags", "key facts", "Last Updated", "Confirmation Status"];
     const now = dayjs();
 
-    // loop through rows (skip header row)
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       const rowObj = {};
@@ -76,7 +75,6 @@ async function cleanupOldPending() {
       if (rowObj["Confirmation Status"] === "pending") {
         const lastUpdated = dayjs(rowObj["Last Updated"]);
         if (now.diff(lastUpdated, "day") >= 7) {
-          // delete this row
           await sheets.spreadsheets.batchUpdate({
             spreadsheetId: SPREADSHEET_ID,
             requestBody: {
@@ -86,7 +84,7 @@ async function cleanupOldPending() {
                     range: {
                       sheetId: MEMORY_SHEET_ID,
                       dimension: "ROWS",
-                      startIndex: i,     // 0-based index (header row = 0)
+                      startIndex: i,
                       endIndex: i + 1,
                     },
                   },
@@ -156,6 +154,13 @@ app.get("/api/memory", async (req, res) => {
       return match;
     });
 
+    if (filtered.length === 0) {
+      return res.json({
+        data: [],
+        message: "No matching entry found in memory. Do you want me to search the web?",
+      });
+    }
+
     res.json({ data: filtered });
   } catch (err) {
     console.error("❌ Error fetching sheet:", err.message);
@@ -163,7 +168,7 @@ app.get("/api/memory", async (req, res) => {
   }
 });
 
-// ✅ POST /api/memory (add new row with unique ID)
+// ✅ POST /api/memory
 app.post("/api/memory", express.json(), async (req, res) => {
   try {
     let rowData = req.body;
@@ -217,7 +222,7 @@ app.post("/api/memory", express.json(), async (req, res) => {
   }
 });
 
-// ✅ PUT /api/memory → update Confirmation Status by ID
+// ✅ PUT /api/memory
 app.put("/api/memory", express.json(), async (req, res) => {
   try {
     const { ID, ConfirmationStatus } = req.body;
@@ -238,7 +243,7 @@ app.put("/api/memory", express.json(), async (req, res) => {
 
     rows.slice(1).forEach((row, i) => {
       if (row[0] == ID) {
-        targetRowIndex = i + 2; // +2 = account for header row
+        targetRowIndex = i + 2;
       }
     });
 
@@ -264,7 +269,7 @@ app.put("/api/memory", express.json(), async (req, res) => {
   }
 });
 
-// ✅ DELETE /api/memory → hard delete by ID
+// ✅ DELETE /api/memory
 app.delete("/api/memory", express.json(), async (req, res) => {
   try {
     const ID = req.body?.ID || req.query?.ID;
@@ -280,7 +285,7 @@ app.delete("/api/memory", express.json(), async (req, res) => {
     let targetRowIndex = -1;
 
     rows.slice(1).forEach((row, i) => {
-      if (row[0] == ID) targetRowIndex = i + 1; // +1 for zero-based index offset
+      if (row[0] == ID) targetRowIndex = i + 1;
     });
 
     if (targetRowIndex === -1) {
@@ -312,7 +317,7 @@ app.delete("/api/memory", express.json(), async (req, res) => {
   }
 });
 
-// ✅ POST /api/memory/summary → auto-generate a summary row
+// ✅ POST /api/memory/summary
 app.post("/api/memory/summary", express.json(), async (req, res) => {
   try {
     let summary = req.body;
