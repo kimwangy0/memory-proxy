@@ -12,10 +12,10 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "your-spreadsheet-id";
 const RANGE_NAME = "Memory!A:F"; // includes ID column
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
-// ⚠️ Replace this with your Memory sheet’s gid (from the URL #gid=xxxx)
+// ⚠️ Replace with your Memory sheet’s gid (#gid=xxxxx in the URL)
 const MEMORY_SHEET_ID = parseInt(process.env.MEMORY_SHEET_ID || "0", 10);
 
-// 🔑 Load GCP service account creds for Secret Manager access
+// 🔑 Secret Manager client
 function getSecretManagerClient() {
   if (!process.env.GOOGLE_APPLICATION_CREDENTIALS_B64) {
     throw new Error("Missing GOOGLE_APPLICATION_CREDENTIALS_B64 env var");
@@ -30,7 +30,7 @@ function getSecretManagerClient() {
 
 const secretClient = getSecretManagerClient();
 
-// 🔑 Fetch service account creds (for Sheets) from Secret Manager
+// 🔑 Fetch creds
 async function getServiceAccountCredentials() {
   const [version] = await secretClient.accessSecretVersion({
     name: `projects/${PROJECT_ID}/secrets/${SECRET_NAME}/versions/latest`,
@@ -38,7 +38,7 @@ async function getServiceAccountCredentials() {
   return JSON.parse(version.payload.data.toString("utf8"));
 }
 
-// 🔑 Build Sheets API client
+// 🔑 Sheets API client
 async function getSheetsService() {
   const creds = await getServiceAccountCredentials();
   const auth = new google.auth.GoogleAuth({
@@ -68,14 +68,7 @@ app.get("/api/memory", async (req, res) => {
     });
 
     let rows = result.data.values || [];
-    const headers = [
-      "ID",
-      "Topics",
-      "Tags",
-      "key facts",
-      "Last Updated",
-      "Confirmation Status",
-    ];
+    const headers = ["ID", "Topics", "Tags", "key facts", "Last Updated", "Confirmation Status"];
 
     rows = rows.slice(1).map((row) => {
       let obj = {};
@@ -151,4 +144,114 @@ app.post("/api/memory", express.json(), async (req, res) => {
     });
 
     res.json({ success: true, message: "Row added successfully", sentPayload: newRow });
+  } catch (err) {
+    console.error("❌ Error adding row:", err.message);
+    res.status(500).json({ error: "Failed to add row", details: err.message });
   }
+});
+
+// ✅ PUT /api/memory → update Confirmation Status by ID
+app.put("/api/memory", express.json(), async (req, res) => {
+  try {
+    const { ID, ConfirmationStatus } = req.body;
+    if (!ID || !ConfirmationStatus) {
+      return res.status(400).json({
+        error: "Missing required fields: ID and ConfirmationStatus",
+      });
+    }
+
+    const sheets = await getSheetsService();
+
+    const result = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE_NAME,
+    });
+
+    let rows = result.data.values || [];
+    let targetRowIndex = -1;
+
+    rows.slice(1).forEach((row, i) => {
+      if (row[0] == ID) {
+        targetRowIndex = i + 2; // +2 = account for header row
+      }
+    });
+
+    if (targetRowIndex === -1) {
+      return res.status(404).json({ error: `Row with ID ${ID} not found (it may have been deleted)` });
+    }
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Memory!F${targetRowIndex}`,
+      valueInputOption: "RAW",
+      requestBody: { values: [[ConfirmationStatus]] },
+    });
+
+    res.json({
+      success: true,
+      message: `Row updated: ID ${ID}`,
+      ConfirmationStatus,
+    });
+  } catch (err) {
+    console.error("❌ Error updating row:", err.message);
+    res.status(500).json({ error: "Failed to update row", details: err.message });
+  }
+});
+
+// ✅ DELETE /api/memory → hard delete by ID
+app.delete("/api/memory", express.json(), async (req, res) => {
+  try {
+    const { ID } = req.body;
+    if (!ID) return res.status(400).json({ error: "Missing required field: ID" });
+
+    const sheets = await getSheetsService();
+    const result = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE_NAME,
+    });
+
+    let rows = result.data.values || [];
+    let targetRowIndex = -1;
+
+    rows.slice(1).forEach((row, i) => {
+      if (row[0] == ID) targetRowIndex = i + 1; // +1 for zero-based
+    });
+
+    if (targetRowIndex === -1) {
+      return res.status(404).json({ error: `Row with ID ${ID} not found` });
+    }
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: SPREADSHEET_ID,
+      requestBody: {
+        requests: [
+          {
+            deleteDimension: {
+              range: {
+                sheetId: MEMORY_SHEET_ID,
+                dimension: "ROWS",
+                startIndex: targetRowIndex,
+                endIndex: targetRowIndex + 1,
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    res.json({ success: true, message: `Row hard deleted: ID ${ID}` });
+  } catch (err) {
+    console.error("❌ Error deleting row:", err.message);
+    res.status(500).json({ error: "Failed to hard delete row", details: err.message });
+  }
+});
+
+// ✅ Mount summary routes
+const summaryRoutes = require("./summaryRoutes");
+app.use("/api/summary", summaryRoutes);
+
+// ✅ Start server
+app.listen(PORT, () => {
+  console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
+  console.log(`🚀 Summary Routes available at http://localhost:${PORT}/api/summary`);
+});
