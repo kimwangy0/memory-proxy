@@ -1,3 +1,5 @@
+// server.js
+
 const express = require("express");
 const { google } = require("googleapis");
 const { SecretManagerServiceClient } = require("@google-cloud/secret-manager");
@@ -197,7 +199,7 @@ app.put("/api/memory", express.json(), async (req, res) => {
   }
 });
 
-// ✅ DELETE /api/memory → hard delete by ID (accepts body or query param)
+// ✅ DELETE /api/memory → hard delete by ID
 app.delete("/api/memory", express.json(), async (req, res) => {
   try {
     const ID = req.body?.ID || req.query?.ID;
@@ -245,12 +247,62 @@ app.delete("/api/memory", express.json(), async (req, res) => {
   }
 });
 
-// ✅ Mount summary routes
-const summaryRoutes = require("./summaryRoutes");
-app.use("/api/summary", summaryRoutes);
+// ✅ POST /api/memory/summary → auto-generate a summary row
+app.post("/api/memory/summary", express.json(), async (req, res) => {
+  try {
+    let summary = req.body;
+
+    if (!summary.Topics || !summary["key facts"]) {
+      return res.status(400).json({
+        error: "Missing required fields: Topics and key facts",
+      });
+    }
+
+    const sheets = await getSheetsService();
+
+    const result = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE_NAME,
+    });
+
+    let rows = result.data.values || [];
+    let maxID = 0;
+    rows.slice(1).forEach((row) => {
+      const idVal = parseInt(row[0]);
+      if (!isNaN(idVal) && idVal > maxID) maxID = idVal;
+    });
+    const nextID = maxID + 1;
+
+    const newRow = [
+      nextID,
+      summary.Topics,
+      summary.Tags || "",
+      summary["key facts"],
+      new Date().toISOString().slice(0, 10),
+      summary["Confirmation Status"] || "pending",
+    ];
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE_NAME,
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [newRow] },
+    });
+
+    res.json({
+      success: true,
+      message: "Auto-summary row added successfully",
+      sentPayload: newRow,
+    });
+  } catch (err) {
+    console.error("❌ Error adding auto-summary:", err.message);
+    res.status(500).json({ error: "Failed to add auto-summary row", details: err.message });
+  }
+});
 
 // ✅ Start server
 app.listen(PORT, () => {
   console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
-  console.log(`🚀 Summary Routes available at http://localhost:${PORT}/api/summary`);
+  console.log(`🚀 Auto-Summary available at http://localhost:${PORT}/api/memory/summary`);
 });
