@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 3000;
 const PROJECT_ID = process.env.GCP_PROJECT_ID || "your-project-id";
 const SECRET_NAME = process.env.SECRET_NAME || "INOUMemoryServiceAccount";
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "your-spreadsheet-id";
-const RANGE_NAME = "Memory!A:E";
+const RANGE_NAME = "Memory!A:F"; // now includes ID column
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
 // 🔑 Load GCP service account creds for Secret Manager access
@@ -65,7 +65,14 @@ app.get("/api/memory", async (req, res) => {
     });
 
     let rows = result.data.values || [];
-    const headers = ["Topics", "Tags", "key facts", "Last Updated", "Confirmation Status"];
+    const headers = [
+      "ID",
+      "Topics",
+      "Tags",
+      "key facts",
+      "Last Updated",
+      "Confirmation Status",
+    ];
 
     rows = rows.slice(1).map((row) => {
       let obj = {};
@@ -109,102 +116,11 @@ app.post("/api/memory", express.json(), async (req, res) => {
       });
     }
 
-    const newRow = [
-      rowData.Topics,
-      rowData.Tags,
-      rowData["key facts"],
-      new Date().toISOString().slice(0, 10),
-      rowData["Confirmation Status"] || "pending",
-    ];
-
-    const sheets = await getSheetsService();
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SPREADSHEET_ID,
-      range: RANGE_NAME,
-      valueInputOption: "RAW",
-      insertDataOption: "INSERT_ROWS",
-      requestBody: { values: [newRow] },
-    });
-
-    res.json({ success: true, message: "Row added successfully", sentPayload: newRow });
-  } catch (err) {
-    console.error("❌ Error adding row:", err.message);
-    res.status(500).json({ error: "Failed to add row", details: err.message });
-  }
-});
-
-// ✅ PUT /api/memory → update Confirmation Status
-app.put("/api/memory", express.json(), async (req, res) => {
-  try {
-    const { Topics, ConfirmationStatus } = req.body;
-    if (!Topics || !ConfirmationStatus) {
-      return res.status(400).json({
-        error: "Missing required fields: Topics and ConfirmationStatus",
-      });
-    }
-
     const sheets = await getSheetsService();
     const result = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: RANGE_NAME,
     });
 
-    let rows = result.data.values || [];
-    let index = rows.findIndex((row) => row[0] === Topics);
-
-    if (index === -1) return res.status(404).json({ error: "Row not found" });
-
-    const rowNumber = index + 1; // account for header row
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `Memory!E${rowNumber + 1}`,
-      valueInputOption: "RAW",
-      requestBody: { values: [[ConfirmationStatus]] },
-    });
-
-    res.json({ success: true, message: `Row updated: ${Topics}`, ConfirmationStatus });
-  } catch (err) {
-    console.error("❌ Error updating row:", err.message);
-    res.status(500).json({ error: "Failed to update row", details: err.message });
-  }
-});
-
-// ✅ DELETE /api/memory → delete by Topics
-app.delete("/api/memory", express.json(), async (req, res) => {
-  try {
-    const { Topics } = req.body;
-    if (!Topics) return res.status(400).json({ error: "Missing required field: Topics" });
-
-    const sheets = await getSheetsService();
-    const result = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
-      range: RANGE_NAME,
-    });
-
-    let rows = result.data.values || [];
-    let index = rows.findIndex((row) => row[0] === Topics);
-
-    if (index === -1) return res.status(404).json({ error: "Row not found" });
-
-    const rowNumber = index + 1;
-    await sheets.spreadsheets.values.clear({
-      spreadsheetId: SPREADSHEET_ID,
-      range: `Memory!A${rowNumber + 1}:E${rowNumber + 1}`,
-    });
-
-    res.json({ success: true, message: `Row deleted: ${Topics}` });
-  } catch (err) {
-    console.error("❌ Error deleting row:", err.message);
-    res.status(500).json({ error: "Failed to delete row", details: err.message });
-  }
-});
-
-// ✅ Mount summary routes
-const summaryRoutes = require("./summaryRoutes");
-app.use("/api/summary", summaryRoutes);
-
-// ✅ Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
-  console.log(`🚀 Summary Routes available at http://localhost:${PORT}/api/summary`);
-});
+    const rowCount = result.data.values ? result.data.values.length : 1;
+    const nextID = rowC

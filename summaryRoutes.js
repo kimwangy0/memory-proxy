@@ -9,7 +9,7 @@ const router = express.Router();
 const PROJECT_ID = process.env.GCP_PROJECT_ID || "your-project-id";
 const SECRET_NAME = process.env.SECRET_NAME || "INOUMemoryServiceAccount";
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "your-spreadsheet-id";
-const RANGE_NAME = "Memory!A:E";
+const RANGE_NAME = "Memory!A:F"; // includes ID column
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
 function getSecretManagerClient() {
@@ -58,7 +58,7 @@ async function updateConfirmationStatus(rowIndex, status) {
   const sheets = await getSheetsService();
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
-    range: `Memory!E${rowIndex}`, // Column E
+    range: `Memory!F${rowIndex}`, // Column F = Confirmation Status
     valueInputOption: "RAW",
     requestBody: { values: [[status]] },
   });
@@ -138,8 +138,8 @@ async function autoDeleteExpiredCards() {
 
   let rows = result.data.values || [];
   rows.slice(1).forEach(async (row, i) => {
-    const lastUpdated = new Date(row[3]); // Column D
-    const status = row[4]; // Column E
+    const lastUpdated = new Date(row[4]); // Column E = Last Updated
+    const status = row[5]; // Column F = Confirmation Status
     const diffDays = (Date.now() - lastUpdated.getTime()) / (1000 * 60 * 60 * 24);
 
     if (status === "pending" && diffDays > 7) {
