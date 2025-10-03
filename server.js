@@ -123,4 +123,82 @@ app.post("/api/memory", express.json(), async (req, res) => {
     });
 
     const rowCount = result.data.values ? result.data.values.length : 1;
-    const nextID = rowC
+    const nextID = rowCount; // assign sequential ID
+
+    const newRow = [
+      nextID, // ID in Column A
+      rowData.Topics,
+      rowData.Tags,
+      rowData["key facts"],
+      new Date().toISOString().slice(0, 10),
+      rowData["Confirmation Status"] || "pending",
+    ];
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE_NAME,
+      valueInputOption: "RAW",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [newRow] },
+    });
+
+    res.json({ success: true, message: "Row added successfully", sentPayload: newRow });
+  } catch (err) {
+    console.error("❌ Error adding row:", err.message);
+    res.status(500).json({ error: "Failed to add row", details: err.message });
+  }
+});
+
+// ✅ PUT /api/memory → update Confirmation Status by ID
+app.put("/api/memory", express.json(), async (req, res) => {
+  try {
+    const { ID, ConfirmationStatus } = req.body;
+    if (!ID || !ConfirmationStatus) {
+      return res.status(400).json({
+        error: "Missing required fields: ID and ConfirmationStatus",
+      });
+    }
+
+    const sheets = await getSheetsService();
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Memory!F${parseInt(ID) + 1}`, // F = Confirmation Status col
+      valueInputOption: "RAW",
+      requestBody: { values: [[ConfirmationStatus]] },
+    });
+
+    res.json({ success: true, message: `Row updated: ID ${ID}`, ConfirmationStatus });
+  } catch (err) {
+    console.error("❌ Error updating row:", err.message);
+    res.status(500).json({ error: "Failed to update row", details: err.message });
+  }
+});
+
+// ✅ DELETE /api/memory → delete by ID
+app.delete("/api/memory", express.json(), async (req, res) => {
+  try {
+    const { ID } = req.body;
+    if (!ID) return res.status(400).json({ error: "Missing required field: ID" });
+
+    const sheets = await getSheetsService();
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `Memory!A${parseInt(ID) + 1}:F${parseInt(ID) + 1}`,
+    });
+
+    res.json({ success: true, message: `Row deleted: ID ${ID}` });
+  } catch (err) {
+    console.error("❌ Error deleting row:", err.message);
+    res.status(500).json({ error: "Failed to delete row", details: err.message });
+  }
+});
+
+// ✅ Mount summary routes
+const summaryRoutes = require("./summaryRoutes");
+app.use("/api/summary", summaryRoutes);
+
+// ✅ Start server
+app.listen(PORT, () => {
+  console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
+  console.log(`🚀 Summary Routes available at http://localhost:${PORT}/api/summary`);
+});
