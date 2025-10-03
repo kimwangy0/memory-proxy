@@ -3,6 +3,7 @@
 const express = require("express");
 const { google } = require("googleapis");
 const { SecretManagerServiceClient } = require("@google-cloud/secret-manager");
+const dayjs = require("dayjs");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,12 +51,76 @@ async function getSheetsService() {
   return google.sheets({ version: "v4", auth });
 }
 
+/**
+ * 🧹 Auto-clean pending rows older than 7 days
+ */
+async function cleanupOldPending() {
+  let deletedIDs = [];
+  try {
+    const sheets = await getSheetsService();
+    const result = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: RANGE_NAME,
+    });
+
+    const rows = result.data.values || [];
+    const headers = ["ID", "Topics", "Tags", "key facts", "Last Updated", "Confirmation Status"];
+    const now = dayjs();
+
+    // loop through rows (skip header row)
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const rowObj = {};
+      headers.forEach((h, j) => (rowObj[h] = row[j] || ""));
+
+      if (rowObj["Confirmation Status"] === "pending") {
+        const lastUpdated = dayjs(rowObj["Last Updated"]);
+        if (now.diff(lastUpdated, "day") >= 7) {
+          // delete this row
+          await sheets.spreadsheets.batchUpdate({
+            spreadsheetId: SPREADSHEET_ID,
+            requestBody: {
+              requests: [
+                {
+                  deleteDimension: {
+                    range: {
+                      sheetId: MEMORY_SHEET_ID,
+                      dimension: "ROWS",
+                      startIndex: i,     // 0-based index (header row = 0)
+                      endIndex: i + 1,
+                    },
+                  },
+                },
+              ],
+            },
+          });
+          deletedIDs.push(rowObj.ID);
+          console.log(`🧹 Auto-deleted row ID ${rowObj.ID} (older than 7 days, still pending)`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("❌ Error during cleanup:", err.message);
+  }
+  return deletedIDs;
+}
+
 // ✅ Health check
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     service: "Memory Proxy (Google Sheets)",
     timestamp: new Date().toISOString(),
+  });
+});
+
+// ✅ Manual cleanup endpoint
+app.delete("/api/memory/cleanup", async (req, res) => {
+  const deletedIDs = await cleanupOldPending();
+  res.json({
+    success: true,
+    message: `Cleanup completed. Deleted ${deletedIDs.length} rows.`,
+    deletedIDs,
   });
 });
 
@@ -301,8 +366,12 @@ app.post("/api/memory/summary", express.json(), async (req, res) => {
   }
 });
 
-// ✅ Start server
-app.listen(PORT, () => {
+// ✅ Start server + run cleanup once on startup
+app.listen(PORT, async () => {
   console.log(`🚀 Memory Proxy running at http://localhost:${PORT}/api/memory`);
   console.log(`🚀 Auto-Summary available at http://localhost:${PORT}/api/memory/summary`);
+  console.log(`🚀 Manual Cleanup available at http://localhost:${PORT}/api/memory/cleanup`);
+
+  console.log("🧹 Running startup cleanup of old pending rows...");
+  await cleanupOldPending();
 });
