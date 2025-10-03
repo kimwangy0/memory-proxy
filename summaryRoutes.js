@@ -1,7 +1,9 @@
 const express = require("express");
-const fetch = require("node-fetch");
 const { google } = require("googleapis");
 const { SecretManagerServiceClient } = require("@google-cloud/secret-manager");
+
+// Use dynamic import for node-fetch (since v3 is ESM-only)
+const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 const router = express.Router();
 
@@ -9,9 +11,12 @@ const router = express.Router();
 const PROJECT_ID = process.env.GCP_PROJECT_ID || "your-project-id";
 const SECRET_NAME = process.env.SECRET_NAME || "INOUMemoryServiceAccount";
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "your-spreadsheet-id";
-const RANGE_NAME = "Memory!A:F"; 
+const RANGE_NAME = "Memory!A:F";
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 const MEMORY_SHEET_ID = parseInt(process.env.MEMORY_SHEET_ID || "0", 10);
+
+// ✅ API base URL (local or deployed)
+const MEMORY_API_URL = process.env.MEMORY_API_URL || "http://localhost:3000/api/memory";
 
 function getSecretManagerClient() {
   const decoded = Buffer.from(
@@ -71,7 +76,7 @@ router.post("/save", async (req, res) => {
 
     row["Confirmation Status"] = "confirmed";
 
-    const response = await fetch("http://localhost:3000/api/memory", {
+    const response = await fetch(`${MEMORY_API_URL}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ data: row }),
@@ -114,8 +119,8 @@ async function autoDeleteExpiredCards() {
 
   let rows = result.data.values || [];
   rows.slice(1).forEach(async (row, i) => {
-    const lastUpdated = new Date(row[4]); 
-    const status = row[5]; 
+    const lastUpdated = new Date(row[4]);
+    const status = row[5];
     const diffDays = (Date.now() - lastUpdated.getTime()) / (1000 * 60 * 60 * 24);
 
     if (status === "pending" && diffDays > 7) {
